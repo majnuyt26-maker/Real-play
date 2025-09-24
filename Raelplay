@@ -1,0 +1,215 @@
+// ReelPay — Single-file React app (Tailwind CSS required) // Save as: ReelPay.jsx // Usage notes (top of file): // 1) This is a self-contained frontend demo. It uses localStorage to simulate users, reels, coins, and wallets. // 2) For production you MUST build a backend (user auth, payments, ad integration, fraud detection). See TODOs below. // 3) Tailwind CSS must be available in your project. This component assumes a React + Vite or Create React App environment with Tailwind configured.
+
+import React, { useEffect, useState } from 'react';
+
+// --------- Configuration (modify for production) --------- const CONFIG = { coinsPerView: 5, // coins awarded per valid view minWatchSeconds: 5, // seconds to consider view valid dailyViewLimit: 200, // per user day limit adProviders: ['AdSense (India)', 'AdMob (US)'], adminPassword: 'admin123', // CHANGE };
+
+// Mock reel data. Replace with your backend API in production. const MOCK_REELS = [ { id: 'r1', title: 'Cute Puppy', src: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4', adCountry: 'IN' }, { id: 'r2', title: 'Travel Clip', src: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/bee.mp4', adCountry: 'US' }, { id: 'r3', title: 'Dance Reel', src: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4', adCountry: 'IN' }, ];
+
+// Utilities for localStorage persistence const storage = { get(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } }, set(key, value) { localStorage.setItem(key, JSON.stringify(value)); } };
+
+// Initialize a demo app 'database' function initDatabase() { if (!storage.get('reels')) storage.set('reels', MOCK_REELS); if (!storage.get('users')) { storage.set('users', { demo: { id: 'demo', name: 'Demo User', coins: 100, watched: {}, referrals: [], joinDate: new Date().toISOString() } }); } }
+
+// Helper: format coins function fmtCoins(n) { return ${n} coin${n===1?'':'s'}; }
+
+export default function ReelPayApp() { initDatabase();
+
+const [userId, setUserId] = useState('demo'); const [users, setUsers] = useState(storage.get('users') || {}); const [reels, setReels] = useState(storage.get('reels') || []); const [activeReel, setActiveReel] = useState(reels[0] || null); const [message, setMessage] = useState(''); const [secondsWatched, setSecondsWatched] = useState(0); const [watchTimer, setWatchTimer] = useState(null); const [country, setCountry] = useState('IN'); const [adminMode, setAdminMode] = useState(false);
+
+useEffect(() => { storage.set('users', users); }, [users]); useEffect(() => { storage.set('reels', reels); }, [reels]);
+
+useEffect(() => { if (!activeReel) setActiveReel(reels[0] || null); }, [reels, activeReel]);
+
+function createUser(name) { const id = u_${Date.now()}; const newUser = { id, name, coins: 0, watched: {}, referrals: [], joinDate: new Date().toISOString() }; const next = { ...users, [id]: newUser }; setUsers(next); setUserId(id); setMessage(Account created: ${name}); }
+
+function claimView(reelId) { const user = users[userId]; if (!user) { setMessage('Login or create an account first.'); return; }
+
+// Daily limit check (simple)
+const todayKey = new Date().toISOString().slice(0,10);
+user.daily = user.daily || {};
+user.daily[todayKey] = user.daily[todayKey] || 0;
+if (user.daily[todayKey] >= CONFIG.dailyViewLimit) { setMessage('Daily view limit reached.'); return; }
+
+// Has user already claimed this reel recently?
+const watched = user.watched[reelId] || 0;
+if (watched > Date.now() - (1000 * 60 * 15)) { setMessage('You already earned from this reel recently.'); return; }
+
+// Award coins
+user.coins += CONFIG.coinsPerView;
+user.watched[reelId] = Date.now();
+user.daily[todayKey] += 1;
+
+setUsers({ ...users, [userId]: user });
+setMessage(`+${CONFIG.coinsPerView} coins! Now ${fmtCoins(user.coins)}.`);
+
+}
+
+function startWatching(reel) { setActiveReel(reel); setSecondsWatched(0); if (watchTimer) clearInterval(watchTimer); const t = setInterval(() => setSecondsWatched(s => s + 1), 1000); setWatchTimer(t); }
+
+function stopWatching() { if (watchTimer) { clearInterval(watchTimer); setWatchTimer(null); } }
+
+useEffect(() => { if (secondsWatched >= CONFIG.minWatchSeconds && activeReel) { stopWatching(); claimView(activeReel.id); } }, [secondsWatched]);
+
+function withdrawCoins() { const user = users[userId]; if (!user) { setMessage('Please login'); return; } if (user.coins < 100) { setMessage('Minimum withdraw: 100 coins.'); return; } // In production: call backend payout API (Paytm, Stripe, UPI etc.) setMessage('Withdrawal requested. (Demo: no real payout)'); user.coins = 0; setUsers({ ...users, [userId]: user }); }
+
+function addReelDemo() { const id = r_${Date.now()}; const newReel = { id, title: User reel ${id}, src: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/bee.mp4', adCountry: country }; const next = [newReel, ...reels]; setReels(next); }
+
+function loginAsDemo() { setUserId('demo'); setMessage('Switched to demo user'); }
+
+function registerReferral(targetUserId) { const user = users[userId]; if (!user) return; user.referrals.push(targetUserId); setUsers({ ...users, [userId]: user }); }
+
+// Simple admin action: credit all users small coins (for testing) function adminCreditAll() { const next = { ...users }; Object.keys(next).forEach(k => { next[k].coins += 50; }); setUsers(next); setMessage('All users credited 50 coins (admin).'); }
+
+// Small UI components const UserCard = () => { const user = users[userId]; if (!user) return ( <div className="p-4 bg-white rounded shadow"> <h3 className="text-lg font-semibold">No user</h3> <button className="mt-2 p-2 bg-blue-500 text-white rounded" onClick={() => createUser('NewUser')}>Create account</button> <button className="mt-2 p-2 bg-gray-200 rounded ml-2" onClick={loginAsDemo}>Use demo</button> </div> );
+
+return (
+  <div className="p-4 bg-white rounded shadow">
+    <div className="flex items-center justify-between">
+      <div>
+        <h3 className="text-lg font-semibold">{user.name}</h3>
+        <p className="text-sm text-gray-600">Joined: {new Date(user.joinDate).toLocaleDateString()}</p>
+      </div>
+      <div className="text-right">
+        <div className="text-xl font-bold">{user.coins} coins</div>
+        <div className="text-xs text-gray-500">{fmtCoins(user.coins)}</div>
+      </div>
+    </div>
+    <div className="mt-3 flex gap-2">
+      <button className="p-2 bg-green-500 text-white rounded" onClick={withdrawCoins}>Withdraw</button>
+      <button className="p-2 bg-indigo-500 text-white rounded" onClick={() => navigator.clipboard?.writeText(`ref:${user.id}`)}>Copy referral</button>
+    </div>
+  </div>
+);
+
+};
+
+const ReelCard = ({ reel }) => ( <div className="bg-white rounded shadow overflow-hidden"> <div className="p-2"> <h4 className="font-semibold">{reel.title}</h4> <p className="text-xs text-gray-500">Ad region: {reel.adCountry}</p> </div> <div className="aspect-video bg-black"> <video src={reel.src} controls onPlay={() => startWatching(reel)} onPause={stopWatching} onEnded={() => stopWatching()} className="w-full h-full object-cover" /> </div> <div className="p-2 flex items-center justify-between"> <button className="p-2 bg-yellow-400 rounded" onClick={() => claimView(reel.id)}>Claim Now</button> <div className="text-sm text-gray-600">Watch {CONFIG.minWatchSeconds}s to auto-claim ({secondsWatched}s)</div> </div> </div> );
+
+return ( <div className="min-h-screen p-6 bg-gradient-to-br from-sky-50 to-white"> <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6"> <div className="col-span-2"> <header className="flex items-center justify-between mb-4"> <h1 className="text-2xl font-bold">ReelPay — Watch reels, earn coins</h1> <div className="flex gap-2 items-center"> <select value={country} onChange={(e)=>setCountry(e.target.value)} className="p-2 border rounded"> <option value="IN">India</option> <option value="US">United States</option> <option value="Other">Other</option> </select> <button className="p-2 bg-gray-200 rounded" onClick={()=>setAdminMode(!adminMode)}>{adminMode ? 'Exit Admin' : 'Admin'}</button> </div> </header>
+
+<main className="space-y-4">
+        {message && <div className="p-3 bg-green-50 border border-green-200 rounded">{message}</div>}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {reels.map(r => <ReelCard key={r.id} reel={r} />)}
+        </div>
+
+        <div className="mt-4 p-4 bg-white rounded shadow">
+          <h3 className="font-semibold">How earnings work (demo)</h3>
+          <ol className="list-decimal ml-5 mt-2 text-sm text-gray-700">
+            <li>Watch a reel for at least {CONFIG.minWatchSeconds} seconds to earn {CONFIG.coinsPerView} coins.</li>
+            <li>Each reel can be rewarded once per 15 minutes per user (demo anti-fraud).</li>
+            <li>Minimum withdraw is 100 coins (demo). Integrate payment gateways for real payouts.</li>
+          </ol>
+        </div>
+
+        <div className="mt-4 p-4 bg-white rounded shadow">
+          <h3 className="font-semibold">Ads (placeholders)</h3>
+          <p className="text-sm text-gray-600">This demo shows where ad slots would be — integrate AdSense / AdMob SDKs or server-side ad calls here and route ad inventory by country ({CONFIG.adProviders.join(', ')}).</p>
+        </div>
+
+        <div className="mt-4 p-4 bg-white rounded shadow">
+          <h3 className="font-semibold">Developer TODO for production</h3>
+          <ul className="list-disc ml-5 mt-2 text-sm text-gray-700">
+            <li>Backend: user auth (JWT), database (Postgres/Mongo), and server endpoints for reels, payouts, referrals.</li>
+            <li>Payments: integrate Paytm/UPI for India, PayPal/Stripe for global withdrawals.</li>
+            <li>Ads: integrate Google AdSense/AdMob, or mediated ad network; sell CPM/CPA to advertisers.</li>
+            <li>Fraud prevention: device fingerprinting, rate limits, server-side view verification, human audits.</li>
+            <li>Legal: Terms of Use, Privacy Policy, KYC for withdrawals as required by region.</li>
+          </ul>
+        </div>
+      </main>
+    </div>
+
+    <aside>
+      <UserCard />
+
+      <div className="mt-4 p-4 bg-white rounded shadow">
+        <h4 className="font-semibold">Account actions</h4>
+        <div className="mt-2 flex flex-col gap-2">
+          <button className="p-2 bg-blue-500 text-white rounded" onClick={() => createUser(prompt('Enter name for new account:') || 'User')}>Register</button>
+          <button className="p-2 bg-gray-200 rounded" onClick={loginAsDemo}>Switch to demo</button>
+          <button className="p-2 bg-indigo-500 text-white rounded" onClick={addReelDemo}>Upload demo reel</button>
+        </div>
+      </div>
+
+      <div className="mt-4 p-4 bg-white rounded shadow">
+        <h4 className="font-semibold">Referral</h4>
+        <p className="text-sm text-gray-600">Invite friends with your referral code to earn bonuses.</p>
+        <div className="mt-2">
+          <input className="w-full p-2 border rounded" placeholder="Paste referral to register" onBlur={(e)=>{
+            const val = e.target.value.trim(); if (!val) return; if (!val.startsWith('ref:')) return setMessage('Invalid referral format');
+            const refId = val.replace('ref:', ''); registerReferral(refId); setMessage('Referral registered');
+          }} />
+        </div>
+      </div>
+
+      {adminMode && (
+        <div className="mt-4 p-4 bg-red-50 rounded shadow">
+          <h4 className="font-semibold">Admin panel (demo)</h4>
+          <div className="mt-2 flex flex-col gap-2">
+            <button className="p-2 bg-red-500 text-white rounded" onClick={adminCreditAll}>Credit all users +50</button>
+            <button className="p-2 bg-yellow-400 rounded" onClick={() => { const pw = prompt('Enter admin password:'); if (pw === CONFIG.adminPassword) { setMessage('Admin actions enabled'); } else setMessage('Wrong password'); }}>Authenticate</button>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-4 p-4 text-xs text-gray-500">
+        <p>Demo app — Replace frontend calls with secure backend for production.</p>
+      </div>
+    </aside>
+  </div>
+</div>
+
+); }
+
+/* README / deployment notes (keep with file)
+
+1. Local run (Vite):
+
+Create a React + Vite project (or CRA) and add Tailwind CSS.
+
+Drop this file as src/ReelPay.jsx and import it in App.jsx: import ReelPayApp from './ReelPay';
+
+Use <ReelPayApp /> in your app.
+
+
+
+2. Backend suggestions (minimal):
+
+Node.js + Express or Fastify, PostgreSQL/MongoDB.
+
+Endpoints: /api/reels, /api/auth, /api/users/:id/wallet, /api/payout
+
+Server should verify view events (e.g., signed view tokens, server-side event receipts) to prevent spoofing.
+
+
+
+3. Ad integration:
+
+Client-side: integrate Google AdSense for web and serve ad slots.
+
+Mobile: consider AdMob and UPI/Paytm payments.
+
+
+
+4. Security & compliance:
+
+Rate limit, CAPTCHA, device risk scoring.
+
+KYC for money transfers as required by local law.
+
+
+
+5. Monetization models:
+
+CPM ads: revenue split between platform and users.
+
+Sponsor reels: advertisers pay per view and you distribute a portion to viewers.
+
+
+
+6. Important: This demo intentionally uses localStorage only — not safe for production. */
+
+
+
